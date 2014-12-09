@@ -1,10 +1,23 @@
 package com.example.android.photobyintent;
 
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
+
+import org.unbiquitous.uos.core.InitialProperties;
+import org.unbiquitous.uos.core.UOS;
+import org.unbiquitous.uos.core.adaptabitilyEngine.Gateway;
+import org.unbiquitous.uos.core.adaptabitilyEngine.ServiceCallException;
+import org.unbiquitous.uos.core.driverManager.DriverData;
+import org.unbiquitous.uos.core.messageEngine.dataType.UpDevice;
+import org.unbiquitous.uos.core.messageEngine.messages.Call;
+import org.unbiquitous.uos.core.messageEngine.messages.Call.ServiceType;
+import org.unbiquitous.uos.core.messageEngine.messages.Response;
+import org.unbiquitous.uos.network.socket.radar.MulticastRadar;
 
 import android.app.Activity;
 import android.content.Context;
@@ -14,6 +27,7 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -36,6 +50,8 @@ public class PhotoIntentActivity extends Activity {
 	private ImageView mImageView;
 	private Bitmap mImageBitmap;
 
+	UOS appContext = new UOS();
+	
 	private static final String VIDEO_STORAGE_KEY = "viewvideo";
 	private static final String VIDEOVIEW_VISIBILITY_STORAGE_KEY = "videoviewvisibility";
 	private VideoView mVideoView;
@@ -84,6 +100,7 @@ public class PhotoIntentActivity extends Activity {
 		String imageFileName = JPEG_FILE_PREFIX + timeStamp + "_";
 		File albumF = getAlbumDir();
 		File imageF = File.createTempFile(imageFileName, JPEG_FILE_SUFFIX, albumF);
+		System.out.println(imageF.length());
 		return imageF;
 	}
 
@@ -124,7 +141,7 @@ public class PhotoIntentActivity extends Activity {
 
 		/* Decode the JPEG file into a Bitmap */
 		Bitmap bitmap = BitmapFactory.decodeFile(mCurrentPhotoPath, bmOptions);
-		
+		System.out.println(bitmap.getByteCount());
 		/* Associate the Bitmap to the ImageView */
 		mImageView.setImageBitmap(bitmap);
 		mVideoUri = null;
@@ -232,7 +249,19 @@ public class PhotoIntentActivity extends Activity {
 		mVideoView = (VideoView) findViewById(R.id.videoView1);
 		mImageBitmap = null;
 		mVideoUri = null;
+		final MulticastRadar.Properties configs = new MulticastRadar.Properties();
+		
+		AsyncTask<Void, Void, Void> middlewareTask = new AsyncTask<Void, Void, Void>(){
 
+			@Override
+			protected Void doInBackground(Void... params) {
+				appContext.start(configs);
+				return null;
+			}
+			
+		};
+		middlewareTask.execute((Void) null);
+		
 		Button picBtn = (Button) findViewById(R.id.btnIntend);
 		setBtnListenerOrDisable( 
 				picBtn, 
@@ -275,9 +304,12 @@ public class PhotoIntentActivity extends Activity {
 			if (resultCode == RESULT_OK) {
 				handleSmallCameraPhoto(data);
 			}
+			
 			break;
 		} // ACTION_TAKE_PHOTO_S
 
+		
+		
 		case ACTION_TAKE_VIDEO: {
 			if (resultCode == RESULT_OK) {
 				handleCameraVideo(data);
@@ -285,6 +317,33 @@ public class PhotoIntentActivity extends Activity {
 			break;
 		} // ACTION_TAKE_VIDEO
 		} // switch
+		
+		ByteBuffer imageBuffer = ByteBuffer.allocate(mImageBitmap.getByteCount());
+		
+		Call sendImage = new Call("PictureDriver", "sendPicture");
+		sendImage.addParameter("imageSize", mImageBitmap.getByteCount());
+		sendImage.setChannels(1);
+		sendImage.setServiceType(ServiceType.STREAM);
+		
+
+		Gateway gateway = appContext.getGateway();
+		List<DriverData> listDrivers = gateway.listDrivers("PictureDriver");
+		UpDevice device = listDrivers.get(0).getDevice();
+		try {
+			Response response = gateway.callService(device, sendImage);
+			DataOutputStream out = response.getMessageContext().getDataOutputStream();
+			
+			for(byte b : imageBuffer.array()){
+				out.write(b);
+			}
+			out.close();
+			
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		appContext.stop();
+		
 	}
 
 	// Some lifecycle callbacks so that the image can survive orientation change
@@ -305,12 +364,12 @@ public class PhotoIntentActivity extends Activity {
 		mImageView.setImageBitmap(mImageBitmap);
 		mImageView.setVisibility(
 				savedInstanceState.getBoolean(IMAGEVIEW_VISIBILITY_STORAGE_KEY) ? 
-						ImageView.VISIBLE : ImageView.INVISIBLE
+						View.VISIBLE : View.INVISIBLE
 		);
 		mVideoView.setVideoURI(mVideoUri);
 		mVideoView.setVisibility(
 				savedInstanceState.getBoolean(VIDEOVIEW_VISIBILITY_STORAGE_KEY) ? 
-						ImageView.VISIBLE : ImageView.INVISIBLE
+						View.VISIBLE : View.INVISIBLE
 		);
 	}
 
